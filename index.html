@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BookShelf - Your Digital Library</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+        }
+        .loading {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            z-index: 1000;
+        }
+        .loading.active {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Loading Spinner -->
+    <div id="loading" class="loading">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="bg-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="/" class="text-2xl font-bold text-indigo-600">BookShelf</a>
+                </div>
+                <div class="flex-1 mx-8">
+                    <div class="relative">
+                        <input type="text" 
+                               id="searchInput" 
+                               placeholder="Search books..." 
+                               class="w-full px-4 py-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                               onkeyup="handleSearch(event)">
+                        <button onclick="clearSearch()" class="absolute right-3 top-2 text-gray-400 hover:text-gray-600">
+                            ✕
+                        </button>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div id="userInfo" class="hidden">
+                        <button onclick="showMyShelf()" class="text-gray-600 hover:text-indigo-600">My Shelf</button>
+                        <span id="userName" class="text-gray-600 ml-4"></span>
+                        <button onclick="logout()" class="ml-4 text-gray-600 hover:text-indigo-600">Logout</button>
+                    </div>
+                    <div id="authButtons">
+                        <a href="/login" class="text-gray-600 hover:text-indigo-600">Login</a>
+                        <a href="/register" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700">Sign Up</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <div class="bg-indigo-600 text-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
+            <div class="text-center">
+                <h1 class="text-4xl font-bold sm:text-5xl md:text-6xl">
+                    Discover Your Next Favorite Book
+                </h1>
+                <p class="mt-6 text-xl text-indigo-100">
+                    Browse thousands of books, build your digital shelf, and enjoy reading anywhere.
+                </p>
+                <div class="mt-10">
+                    <a href="#featured" class="bg-white text-indigo-600 px-8 py-3 rounded-md font-medium hover:bg-indigo-50">
+                        Browse Books
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Featured Books Section -->
+    <div id="featured" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <h2 class="text-3xl font-bold text-gray-900 mb-8">Featured Books</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8" id="booksGrid">
+            <!-- Books will be dynamically inserted here -->
+        </div>
+    </div>
+
+    <!-- Features Section -->
+    <div class="bg-gray-100 py-16">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="text-center">
+                    <div class="text-indigo-600 text-4xl mb-4">📚</div>
+                    <h3 class="text-xl font-semibold text-gray-900">Extensive Collection</h3>
+                    <p class="mt-2 text-gray-600">Access thousands of books across all genres</p>
+                </div>
+                <div class="text-center">
+                    <div class="text-indigo-600 text-4xl mb-4">💳</div>
+                    <h3 class="text-xl font-semibold text-gray-900">Easy Payments</h3>
+                    <p class="mt-2 text-gray-600">Pay securely via Linktree</p>
+                </div>
+                <div class="text-center">
+                    <div class="text-indigo-600 text-4xl mb-4">📱</div>
+                    <h3 class="text-xl font-semibold text-gray-900">Read Anywhere</h3>
+                    <p class="mt-2 text-gray-600">Access your bookshelf on any device</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <div>
+                    <h4 class="text-lg font-semibold mb-4">BookShelf</h4>
+                    <p class="text-gray-400">Your digital library companion</p>
+                </div>
+                <div>
+                    <h4 class="text-lg font-semibold mb-4">Quick Links</h4>
+                    <ul class="space-y-2">
+                        <li><a href="#" class="text-gray-400 hover:text-white">Browse Books</a></li>
+                        <li><a href="#" class="text-gray-400 hover:text-white">My Shelf</a></li>
+                        <li><a href="#" class="text-gray-400 hover:text-white">About Us</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="text-lg font-semibold mb-4">Support</h4>
+                    <ul class="space-y-2">
+                        <li><a href="#" class="text-gray-400 hover:text-white">Help Center</a></li>
+                        <li><a href="#" class="text-gray-400 hover:text-white">Contact Us</a></li>
+                        <li><a href="#" class="text-gray-400 hover:text-white">FAQ</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="text-lg font-semibold mb-4">Connect</h4>
+                    <ul class="space-y-2">
+                        <li><a href="https://linktr.ee/BookShelvzz" target="_blank" class="text-gray-400 hover:text-white">Payment & Support</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="mt-8 pt-8 border-t border-gray-700 text-center text-gray-400">
+                <p>&copy; 2024 BookShelf. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- My Shelf Modal -->
+    <div id="myShelfModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full">
+        <div class="relative top-20 mx-auto p-5 border w-4/5 shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-2xl font-bold text-gray-900">My Shelf</h3>
+                <button onclick="closeMyShelf()" class="text-gray-400 hover:text-gray-600">
+                    ✕
+                </button>
+            </div>
+            <div id="myShelfContent" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                <!-- Purchased books will be displayed here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="config.js"></script>
+    <script>
+        // Initialize Supabase client
+        const supabase = supabase.createClient(config.supabaseUrl, config.supabaseKey);
+
+        // Show loading spinner
+        function showLoading() {
+            document.getElementById('loading').classList.add('active');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.remove('active');
+        }
+
+        // Function to create book cards
+        function createBookCard(book) {
+            return `
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <img src="${book.cover_url || 'https://via.placeholder.com/300x400'}" alt="${book.title}" class="w-full h-64 object-cover">
+                    <div class="p-4">
+                        <h3 class="text-lg font-semibold text-gray-900">${book.title}</h3>
+                        <p class="text-gray-600">${book.author}</p>
+                        <p class="text-sm text-gray-500 mt-2">${book.description}</p>
+                        <div class="mt-4 flex justify-between items-center">
+                            <span class="text-indigo-600 font-semibold">$${book.price}</span>
+                            <button 
+                                onclick="purchaseBook(${book.id})"
+                                class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700">
+                                Purchase
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Function to load books from Supabase
+        async function loadBooks() {
+            showLoading();
+            try {
+                const { data: books, error } = await supabase
+                    .from('books')
+                    .select('*');
+
+                if (error) throw error;
+
+                const booksGrid = document.getElementById('booksGrid');
+                booksGrid.innerHTML = books.map(book => createBookCard(book)).join('');
+            } catch (error) {
+                console.error('Error loading books:', error);
+                alert('Error loading books. Please try again later.');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Function to handle book purchase
+        async function purchaseBook(bookId) {
+            const user = JSON.parse(localStorage.getItem('user'));
+            if (!user) {
+                alert('Please log in to purchase books');
+                return;
+            }
+
+            try {
+                const { error } = await supabase
+                    .from('purchases')
+                    .insert([
+                        { user_id: user.id, book_id: bookId }
+                    ]);
+
+                if (error) throw error;
+
+                window.open(config.linktreeUrl, '_blank');
+                alert('Book added to your shelf!');
+            } catch (error) {
+                console.error('Error purchasing book:', error);
+                alert('Error purchasing book. Please try again later.');
+            }
+        }
+
+        // Function to handle search
+        async function searchBooks(query) {
+            showLoading();
+            try {
+                const { data: books, error } = await supabase
+                    .from('books')
+                    .select('*')
+                    .or(`title.ilike.%${query}%,author.ilike.%${query}%`);
+
+                if (error) throw error;
+
+                const booksGrid = document.getElementById('booksGrid');
+                booksGrid.innerHTML = books.map(book => createBookCard(book)).join('');
+            } catch (error) {
+                console.error('Error searching books:', error);
+                alert('Error searching books. Please try again later.');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Check if user is logged in
+        function checkAuth() {
+            const user = JSON.parse(localStorage.getItem('user'));
+            const userInfo = document.getElementById('userInfo');
+            const authButtons = document.getElementById('authButtons');
+            const userName = document.getElementById('userName');
+
+            if (user) {
+                userInfo.classList.remove('hidden');
+                authButtons.classList.add('hidden');
+                userName.textContent = `Welcome, ${user.name || user.email.split('@')[0]}`;
+            } else {
+                userInfo.classList.add('hidden');
+                authButtons.classList.remove('hidden');
+            }
+        }
+
+        // Logout function
+        function logout() {
+            localStorage.removeItem('user');
+            localStorage.removeItem('shelf');
+            checkAuth();
+        }
+
+        // Function to handle search input
+        function handleSearch(event) {
+            if (event.key === 'Enter') {
+                const query = document.getElementById('searchInput').value.trim();
+                if (query) {
+                    searchBooks(query);
+                }
+            }
+        }
+
+        // Function to clear search
+        function clearSearch() {
+            document.getElementById('searchInput').value = '';
+            loadBooks();
+        }
+
+        // Function to show My Shelf
+        async function showMyShelf() {
+            const user = JSON.parse(localStorage.getItem('user'));
+            if (!user) {
+                alert('Please log in to view your shelf');
+                return;
+            }
+
+            showLoading();
+            try {
+                const { data: purchases, error } = await supabase
+                    .from('purchases')
+                    .select('*, books(*)')
+                    .eq('user_id', user.id);
+
+                if (error) throw error;
+
+                const myShelfContent = document.getElementById('myShelfContent');
+                if (purchases.length === 0) {
+                    myShelfContent.innerHTML = '<p class="text-gray-600">Your shelf is empty. Start adding some books!</p>';
+                } else {
+                    myShelfContent.innerHTML = purchases.map(purchase => createBookCard(purchase.books)).join('');
+                }
+
+                document.getElementById('myShelfModal').classList.remove('hidden');
+            } catch (error) {
+                console.error('Error loading shelf:', error);
+                alert('Error loading your shelf. Please try again later.');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Function to close My Shelf
+        function closeMyShelf() {
+            document.getElementById('myShelfModal').classList.add('hidden');
+        }
+
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', () => {
+            loadBooks();
+            checkAuth();
+
+            // Add search functionality
+            const searchInput = document.createElement('input');
+            searchInput.type = 'text';
+            searchInput.placeholder = 'Search books...';
+            searchInput.className = 'w-full max-w-md px-4 py-2 rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500';
+            searchInput.addEventListener('input', (e) => searchBooks(e.target.value));
+
+            const searchContainer = document.createElement('div');
+            searchContainer.className = 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-8';
+            searchContainer.appendChild(searchInput);
+
+            const featuredSection = document.querySelector('#featured');
+            featuredSection.parentNode.insertBefore(searchContainer, featuredSection);
+        });
+    </script>
+</body>
+</html> 
