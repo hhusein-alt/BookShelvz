@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BookShelf Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .book-card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+        }
+        .button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .button:hover {
+            background-color: #45a049;
+        }
+        #loginForm, #bookList {
+            margin: 20px 0;
+        }
+        input {
+            padding: 8px;
+            margin: 5px 0;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <h1>BookShelf Test Page</h1>
+    
+    <div id="loginForm">
+        <h2>Login</h2>
+        <input type="email" id="email" placeholder="Email">
+        <input type="password" id="password" placeholder="Password">
+        <button class="button" onclick="handleLogin()">Login</button>
+        <button class="button" onclick="handleSignUp()">Sign Up</button>
+    </div>
+
+    <div id="bookList" style="display: none;">
+        <h2>Available Books</h2>
+        <div id="books"></div>
+    </div>
+
+    <script>
+        // Initialize Supabase client
+        const supabaseUrl = 'https://vzyjahpxhcmkwffrlybs.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ6eWphaHB4aGNta3dmZnJseWJzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY2NDMxMDUsImV4cCI6MjA2MjIxOTEwNX0.rI0LLJ5QCtk4CXbSeVIxDqWYeyoTkjyBwgRcJ_RxVyE';
+        const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+
+        async function handleLogin() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const { data, error } = await supabaseClient.auth.signInWithPassword({
+                    email,
+                    password
+                });
+
+                if (error) throw error;
+                alert('Login successful!');
+                loadBooks();
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function handleSignUp() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const { data, error } = await supabaseClient.auth.signUp({
+                    email,
+                    password
+                });
+
+                if (error) throw error;
+                alert('Sign up successful! Please check your email.');
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        async function loadBooks() {
+            try {
+                const { data: books, error } = await supabaseClient
+                    .from('books')
+                    .select('*');
+
+                if (error) throw error;
+
+                const booksDiv = document.getElementById('books');
+                booksDiv.innerHTML = books.map(book => `
+                    <div class="book-card">
+                        <h3>${book.title}</h3>
+                        <p>By ${book.author}</p>
+                        <p>Genre: ${book.genre}</p>
+                        <p>Price: $${book.price}</p>
+                        <button class="button" onclick="addToShelf('${book.id}')">Add to Shelf</button>
+                    </div>
+                `).join('');
+
+                document.getElementById('bookList').style.display = 'block';
+            } catch (error) {
+                alert('Error loading books: ' + error.message);
+            }
+        }
+
+        async function addToShelf(bookId) {
+            try {
+                const { data: { user } } = await supabaseClient.auth.getUser();
+                if (!user) {
+                    alert('Please login first');
+                    return;
+                }
+
+                const { error } = await supabaseClient
+                    .from('orders')
+                    .insert([
+                        {
+                            user_id: user.id,
+                            book_id: bookId,
+                            status: 'pending'
+                        }
+                    ]);
+
+                if (error) throw error;
+                
+                // Redirect to Linktree
+                window.open('https://linktr.ee/BookShelvzz', '_blank');
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // Check if user is already logged in
+        supabaseClient.auth.getSession().then(({ data: { session } }) => {
+            if (session) {
+                loadBooks();
+            }
+        });
+    </script>
+</body>
+</html> 

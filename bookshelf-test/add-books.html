@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Sample Books</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+    </style>
+</head>
+<body>
+    <h1>Add Sample Books</h1>
+    <button class="button" onclick="addSampleBooks()">Add Sample Books</button>
+    <div id="status"></div>
+
+    <script>
+        // Initialize Supabase client
+        const supabaseUrl = 'https://vzyjahpxhcmkwffrlybs.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ6eWphaHB4aGNta3dmZnJseWJzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY2NDMxMDUsImV4cCI6MjA2MjIxOTEwNX0.rI0LLJ5QCtk4CXbSeVIxDqWYeyoTkjyBwgRcJ_RxVyE';
+        const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+
+        const sampleBooks = [
+            {
+                title: "The Great Gatsby",
+                author: "F. Scott Fitzgerald",
+                genre: "Fiction",
+                description: "A story of the fabulously wealthy Jay Gatsby and his love for the beautiful Daisy Buchanan.",
+                cover_url: "https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=500",
+                price: 9.99
+            },
+            {
+                title: "To Kill a Mockingbird",
+                author: "Harper Lee",
+                genre: "Fiction",
+                description: "The story of racial injustice and the loss of innocence in the American South.",
+                cover_url: "https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=500",
+                price: 12.99
+            },
+            {
+                title: "1984",
+                author: "George Orwell",
+                genre: "Science Fiction",
+                description: "A dystopian social science fiction novel and cautionary tale.",
+                cover_url: "https://images.unsplash.com/photo-1532012197267-da84d127e765?w=500",
+                price: 10.99
+            },
+            {
+                title: "The Alchemist",
+                author: "Paulo Coelho",
+                genre: "Fiction",
+                description: "A philosophical novel about a young shepherd's journey to find his personal legend.",
+                cover_url: "https://images.unsplash.com/photo-1512820790803-83ca734da794?w=500",
+                price: 8.99
+            },
+            {
+                title: "Atomic Habits",
+                author: "James Clear",
+                genre: "Self-Development",
+                description: "A guide about building good habits and breaking bad ones.",
+                cover_url: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=500",
+                price: 14.99
+            }
+        ];
+
+        async function addSampleBooks() {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = 'Adding books...';
+            statusDiv.className = '';
+
+            try {
+                for (const book of sampleBooks) {
+                    const { error } = await supabaseClient
+                        .from('books')
+                        .insert([book]);
+
+                    if (error) throw error;
+                }
+
+                statusDiv.innerHTML = 'Successfully added sample books!';
+                statusDiv.className = 'success';
+            } catch (error) {
+                statusDiv.innerHTML = 'Error: ' + error.message;
+                statusDiv.className = 'error';
+            }
+        }
+    </script>
+</body>
+</html> 
