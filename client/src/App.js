@@ -1,21 +1,27 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useNavigate, Navigate } from 'react-router-dom';
 import { createClient } from '@supabase/supabase-js';
 import { UserIcon, BookOpenIcon, HomeIcon, CogIcon } from '@heroicons/react/outline';
-
-// Components
-import Home from './pages/Home';
-import BookCatalog from './pages/BookCatalog';
-import MyShelf from './pages/MyShelf';
-import AdminPanel from './pages/AdminPanel';
-import Login from './pages/Login';
+import { Toaster, toast } from 'react-hot-toast';
+import ErrorBoundary from './components/ErrorBoundary';
+import LoadingSpinner from './components/LoadingSpinner';
 import { ThemeProvider } from './context/ThemeContext';
-import Test from './pages/Test';
+import config from './lib/config';
+
+// Lazy load components
+const Home = lazy(() => import('./pages/Home'));
+const BookCatalog = lazy(() => import('./pages/BookCatalog'));
+const MyShelf = lazy(() => import('./pages/MyShelf'));
+const AdminPanel = lazy(() => import('./pages/AdminPanel'));
+const Login = lazy(() => import('./pages/Login'));
+const Profile = lazy(() => import('./pages/Profile'));
+const PDFReader = lazy(() => import('./pages/PDFReader'));
+const Navigation = lazy(() => import('./components/Navigation'));
 
 // Initialize Supabase client with auto-confirm
 export const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co',
-  import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key',
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
   {
     auth: {
       autoRefreshToken: true,
@@ -25,13 +31,56 @@ export const supabase = createClient(
   }
 );
 
-// Navigation component
-const Navigation = () => {
-  const navigate = useNavigate();
+// Protected Route component
+const ProtectedRoute = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     checkUser();
+  }, []);
+
+  const checkUser = async () => {
+    try {
+      const user = await auth.getCurrentUser();
+      setUser(user);
+    } catch (error) {
+      console.error('Error checking user:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (!user) {
+    return <Navigate to={config.routes.login} />;
+  }
+
+  return children;
+};
+
+// Navigation component
+const NavigationComponent = () => {
+  const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    checkUser();
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN') {
+        setUser(session?.user);
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+      }
+    });
+
+    return () => {
+      authListener?.unsubscribe();
+    };
   }, []);
 
   const checkUser = async () => {
@@ -41,6 +90,9 @@ const Navigation = () => {
       setUser(user);
     } catch (error) {
       console.error('Error checking user:', error);
+      toast.error('Error checking authentication status');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -48,11 +100,17 @@ const Navigation = () => {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
+      toast.success('Successfully signed out');
       navigate('/login');
     } catch (error) {
       console.error('Error signing out:', error);
+      toast.error('Error signing out. Please try again.');
     }
   };
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
 
   return (
     <nav className="bg-white shadow-sm">
@@ -105,26 +163,60 @@ const Navigation = () => {
 // App component
 const App = () => {
   return (
-    <ThemeProvider>
-      <Router>
-        <div className="min-h-screen bg-gray-100">
-          <Navigation />
-          <main className="py-8">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/catalog" element={<BookCatalog />} />
-              <Route path="/book/:id" element={<BookDetails />} />
-              <Route path="/myshelf" element={<MyShelf />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/reader/:bookId" element={<PDFReader />} />
-              <Route path="/admin" element={<AdminPanel />} />
-              <Route path="/test" element={<Test />} />
-            </Routes>
-          </main>
-        </div>
-      </Router>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <Router>
+          <div className="min-h-screen bg-gray-100">
+            <Toaster position="top-right" />
+            <Suspense fallback={<LoadingSpinner />}>
+              <NavigationComponent />
+            </Suspense>
+            <main className="py-8">
+              <Suspense fallback={<LoadingSpinner />}>
+                <Routes>
+                  <Route path={config.routes.home} element={<Home />} />
+                  <Route path={config.routes.login} element={<Login />} />
+                  <Route path={config.routes.catalog} element={<BookCatalog />} />
+                  <Route path="/book/:id" element={<BookDetails />} />
+                  <Route 
+                    path={config.routes.myshelf} 
+                    element={
+                      <ProtectedRoute>
+                        <MyShelf />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path={config.routes.profile} 
+                    element={
+                      <ProtectedRoute>
+                        <Profile />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/reader/:bookId" 
+                    element={
+                      <ProtectedRoute>
+                        <PDFReader />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path={config.routes.admin} 
+                    element={
+                      <ProtectedRoute>
+                        <AdminPanel />
+                      </ProtectedRoute>
+                    } 
+                  />
+                </Routes>
+              </Suspense>
+            </main>
+          </div>
+        </Router>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 };
 

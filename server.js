@@ -3,177 +3,116 @@ const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const path = require('path');
-const { body, validationResult } = require('express-validator');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const compression = require('compression');
+const { errorHandler } = require('./server/middleware/errorHandler');
 const booksRouter = require('./server/routes/books');
 const categoriesRouter = require('./server/routes/categories');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'client', 'dist')));
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", process.env.SUPABASE_URL]
+    }
+  },
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// CORS configuration
+app.use(cors({
+  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many requests from this IP, please try again after 15 minutes'
+});
+
+// Apply rate limiting to API routes
+app.use('/api/', apiLimiter);
+
+// Compression middleware
+app.use(compression());
+
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Initialize Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
+  process.env.SUPABASE_KEY,
+  {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInSession: false
+    }
+  }
 );
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  res.status(500).json({ error: 'Internal server error' });
+// Pass supabase client to routers
+app.use((req, res, next) => {
+  req.supabase = supabase;
+  next();
 });
 
-// GET /books - получить список книг
-app.get('/books', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('books')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    console.error('Error fetching books:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// GET /books/:id - получить книгу по ID
-app.get('/books/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { data, error } = await supabase
-      .from('books')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) throw error;
-    if (!data) {
-      return res.status(404).json({ error: 'Book not found' });
-    }
-    res.json(data);
-  } catch (error) {
-    console.error('Error fetching book:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// POST /books - добавить новую книгу
-app.post('/books', [
-  body('title').notEmpty().withMessage('Title is required'),
-  body('author').notEmpty().withMessage('Author is required')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
-  try {
-    const { title, author, description, category_id, cover_url } = req.body;
-    
-    const { data, error } = await supabase
-      .from('books')
-      .insert([
-        { title, author, description, category_id, cover_url }
-      ])
-      .select()
-      .single();
-
-    if (error) throw error;
-    res.status(201).json(data);
-  } catch (error) {
-    console.error('Error creating book:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// PUT /books/:id - обновить книгу
-app.put('/books/:id', [
-  body('title').optional().notEmpty().withMessage('Title cannot be empty'),
-  body('author').optional().notEmpty().withMessage('Author cannot be empty')
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
-  }
-  try {
-    const { id } = req.params;
-    const { title, author, description, category_id, cover_url } = req.body;
-
-    const { data, error } = await supabase
-      .from('books')
-      .update({ title, author, description, category_id, cover_url })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
-    if (!data) {
-      return res.status(404).json({ error: 'Book not found' });
-    }
-    res.json(data);
-  } catch (error) {
-    console.error('Error updating book:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// DELETE /books/:id - удалить книгу
-app.delete('/books/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { error } = await supabase
-      .from('books')
-      .delete()
-      .eq('id', id);
-
-    if (error) throw error;
-    res.status(204).send();
-  } catch (error) {
-    console.error('Error deleting book:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// GET /categories - получить список категорий
-app.get('/categories', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('categories')
-      .select('*')
-      .order('name');
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error) {
-    console.error('Error fetching categories:', error.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+// Use routers for specific routes
+app.use('/api/books', booksRouter);
+app.use('/api/categories', categoriesRouter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ 
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
+
+// Serve static files from the client/dist directory
+app.use(express.static(path.join(__dirname, 'client', 'dist'), {
+  maxAge: '1d',
+  etag: true
+}));
 
 // API 404 handler
 app.use('/api', (req, res) => {
-  res.status(404).json({ error: 'API route not found' });
+  res.status(404).json({ 
+    error: 'API route not found',
+    path: req.path,
+    method: req.method
+  });
 });
 
-app.use('/books', booksRouter);
-app.use('/categories', categoriesRouter);
+// Catch-all to serve the client-side app for any other route
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'));
+});
+
+// Error handling middleware
+app.use(errorHandler);
 
 // Start server
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
-});
-
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'client', 'dist', 'index.html'));
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`Client URL: ${process.env.CLIENT_URL || 'http://localhost:5173'}`);
 }); 

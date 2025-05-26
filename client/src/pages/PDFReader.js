@@ -1,7 +1,52 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../App';
-import { DocumentTextIcon, BookmarkIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/outline';
+import { supabase, queries } from '../lib/supabase';
+import { DocumentTextIcon, BookmarkIcon, ChevronLeftIcon, ChevronRightIcon, ZoomInIcon, ZoomOutIcon } from '@heroicons/react/outline';
+import * as pdfjsLib from 'pdfjs-dist';
+import { PDFDocumentProxy } from 'pdfjs-dist';
+import { ResponsiveLayout, ResponsiveButton } from '../components/ResponsiveLayout';
+
+// Set worker source
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
+// Memoized page component for better performance
+const PDFPage = memo(({ page, scale, onRender }) => {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const renderPage = async () => {
+      try {
+        const viewport = page.getViewport({ scale });
+        const canvas = canvasRef.current;
+        const context = canvas.getContext('2d');
+
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport
+        };
+
+        await page.render(renderContext).promise;
+        onRender?.();
+      } catch (error) {
+        console.error('Error rendering page:', error);
+      }
+    };
+
+    renderPage();
+  }, [page, scale, onRender]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="w-full"
+      style={{ touchAction: 'none' }}
+      onContextMenu={(e) => e.preventDefault()}
+    />
+  );
+});
 
 const PDFReader = () => {
   const { bookId } = useParams();
@@ -12,123 +57,139 @@ const PDFReader = () => {
   const [loading, setLoading] = useState(true);
   const [bookmarks, setBookmarks] = useState([]);
   const [showBookmarks, setShowBookmarks] = useState(false);
+  const [scale, setScale] = useState(1.5);
+  const [currentPageObj, setCurrentPageObj] = useState(null);
+  const pdfDocRef = useRef(null);
+  const renderTimeoutRef = useRef(null);
 
+  // Fetch book details and initialize PDF
   useEffect(() => {
-    fetchBookDetails();
-    fetchBookmarks();
+    const initializeReader = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          navigate('/login');
+          return;
+        }
+
+        const bookData = await queries.getBooks({ id: bookId });
+        if (!bookData) throw new Error('Book not found');
+        
+        setBook(bookData);
+        
+        if (bookData.pdf_url) {
+          const loadingTask = pdfjsLib.getDocument({
+            url: bookData.pdf_url,
+            cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.12.313/cmaps/',
+            cMapPacked: true,
+            disableStream: true,
+            disableAutoFetch: true
+          });
+
+          const pdfDoc = await loadingTask.promise;
+          pdfDocRef.current = pdfDoc;
+          setTotalPages(pdfDoc.numPages);
+          
+          const initialPage = bookData.reading_progress?.[0]?.progress
+            ? Math.ceil((bookData.reading_progress[0].progress / 100) * pdfDoc.numPages)
+            : 1;
+          
+          setCurrentPage(initialPage);
+          await loadPage(initialPage);
+        }
+      } catch (error) {
+        console.error('Error initializing reader:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeReader();
+    return () => {
+      if (pdfDocRef.current) {
+        pdfDocRef.current.destroy();
+      }
+      if (renderTimeoutRef.current) {
+        clearTimeout(renderTimeoutRef.current);
+      }
+    };
+  }, [bookId, navigate]);
+
+  // Load bookmarks
+  useEffect(() => {
+    const loadBookmarks = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        const bookmarks = await queries.getBookmarks(user.id, bookId);
+        setBookmarks(bookmarks);
+      } catch (error) {
+        console.error('Error loading bookmarks:', error);
+      }
+    };
+
+    loadBookmarks();
   }, [bookId]);
 
-  const fetchBookDetails = async () => {
+  const loadPage = useCallback(async (pageNumber) => {
+    if (!pdfDocRef.current) return;
+
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        navigate('/login');
-        return;
-      }
+      const page = await pdfDocRef.current.getPage(pageNumber);
+      setCurrentPageObj(page);
+    } catch (error) {
+      console.error('Error loading page:', error);
+    }
+  }, []);
 
-      const { data, error } = await supabase
-        .from('books')
-        .select(`
-          *,
-          reading_progress (
-            progress,
-            last_read
-          )
-        `)
-        .eq('id', bookId)
-        .single();
-
-      if (error) throw error;
-      setBook(data);
+  const handlePageChange = useCallback(async (newPage) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setCurrentPage(newPage);
+      await loadPage(newPage);
       
-      // Set initial page from reading progress
-      if (data.reading_progress?.[0]?.progress) {
-        const progress = data.reading_progress[0].progress;
-        setCurrentPage(Math.ceil((progress / 100) * totalPages));
+      // Debounce progress update
+      if (renderTimeoutRef.current) {
+        clearTimeout(renderTimeoutRef.current);
       }
-    } catch (error) {
-      console.error('Error fetching book:', error);
-    } finally {
-      setLoading(false);
+      renderTimeoutRef.current = setTimeout(() => {
+        updateReadingProgress(newPage);
+      }, 1000);
     }
-  };
-
-  const fetchBookmarks = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const { data, error } = await supabase
-        .from('bookmarks')
-        .select('*')
-        .eq('book_id', bookId)
-        .eq('user_id', user.id)
-        .order('page_number');
-
-      if (error) throw error;
-      setBookmarks(data);
-    } catch (error) {
-      console.error('Error fetching bookmarks:', error);
-    }
-  };
+  }, [totalPages, loadPage]);
 
   const updateReadingProgress = async (page) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const progress = Math.min(100, Math.max(0, (page / totalPages) * 100));
-
-      const { error } = await supabase
-        .from('reading_progress')
-        .upsert({
-          user_id: user.id,
-          book_id: bookId,
-          progress: progress,
-          last_read: new Date().toISOString()
-        });
-
-      if (error) throw error;
+      await queries.updateReadingProgress(user.id, bookId, progress);
     } catch (error) {
       console.error('Error updating progress:', error);
     }
   };
 
-  const addBookmark = async () => {
+  const handleZoom = (delta) => {
+    setScale(prevScale => Math.max(0.5, Math.min(3, prevScale + delta)));
+  };
+
+  const handleAddBookmark = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const note = prompt('Add a note to this bookmark (optional):');
-
-      const { error } = await supabase
-        .from('bookmarks')
-        .insert({
-          user_id: user.id,
-          book_id: bookId,
-          page_number: currentPage,
-          note: note || null
-        });
-
-      if (error) throw error;
-      fetchBookmarks();
+      await queries.addBookmark(user.id, bookId, currentPage, note);
+      const bookmarks = await queries.getBookmarks(user.id, bookId);
+      setBookmarks(bookmarks);
     } catch (error) {
       console.error('Error adding bookmark:', error);
     }
   };
 
-  const removeBookmark = async (bookmarkId) => {
+  const handleRemoveBookmark = async (bookmarkId) => {
     try {
-      const { error } = await supabase
-        .from('bookmarks')
-        .delete()
-        .eq('id', bookmarkId);
-
-      if (error) throw error;
-      fetchBookmarks();
+      await queries.removeBookmark(bookmarkId);
+      const { data: { user } } = await supabase.auth.getUser();
+      const bookmarks = await queries.getBookmarks(user.id, bookId);
+      setBookmarks(bookmarks);
     } catch (error) {
       console.error('Error removing bookmark:', error);
-    }
-  };
-
-  const handlePageChange = (newPage) => {
-    if (newPage >= 1 && newPage <= totalPages) {
-      setCurrentPage(newPage);
-      updateReadingProgress(newPage);
     }
   };
 
@@ -141,115 +202,127 @@ const PDFReader = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <ResponsiveLayout>
       {/* Header */}
       <div className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center space-x-4">
-            <button
+            <ResponsiveButton
               onClick={() => navigate('/myshelf')}
-              className="text-gray-600 hover:text-gray-900"
+              variant="secondary"
             >
               <ChevronLeftIcon className="h-6 w-6" />
-            </button>
+            </ResponsiveButton>
             <h1 className="text-xl font-semibold">{book?.title}</h1>
           </div>
           <div className="flex items-center space-x-4">
-            <button
+            <ResponsiveButton
+              onClick={() => handleZoom(-0.2)}
+              variant="secondary"
+            >
+              <ZoomOutIcon className="h-5 w-5" />
+            </ResponsiveButton>
+            <ResponsiveButton
+              onClick={() => handleZoom(0.2)}
+              variant="secondary"
+            >
+              <ZoomInIcon className="h-5 w-5" />
+            </ResponsiveButton>
+            <ResponsiveButton
               onClick={() => setShowBookmarks(!showBookmarks)}
-              className="text-gray-600 hover:text-gray-900"
+              variant="secondary"
             >
               <BookmarkIcon className="h-6 w-6" />
-            </button>
+            </ResponsiveButton>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="flex">
-          {/* PDF Viewer */}
-          <div className="flex-1">
-            <div className="bg-white rounded-lg shadow-lg p-4">
-              <iframe
-                src={`${book?.pdf_url}#page=${currentPage}`}
-                className="w-full h-[calc(100vh-200px)]"
-                title="PDF Viewer"
+      <div className="flex">
+        {/* PDF Viewer */}
+        <div className="flex-1">
+          <div className="bg-white rounded-lg shadow-lg p-4">
+            {currentPageObj && (
+              <PDFPage
+                page={currentPageObj}
+                scale={scale}
+                onRender={() => updateReadingProgress(currentPage)}
               />
-            </div>
-
-            {/* Navigation Controls */}
-            <div className="mt-4 flex justify-between items-center">
-              <button
-                onClick={() => handlePageChange(currentPage - 1)}
-                disabled={currentPage <= 1}
-                className="px-4 py-2 bg-gray-200 rounded disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <span className="text-gray-600">
-                Page {currentPage} of {totalPages}
-              </span>
-              <button
-                onClick={() => handlePageChange(currentPage + 1)}
-                disabled={currentPage >= totalPages}
-                className="px-4 py-2 bg-gray-200 rounded disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
+            )}
           </div>
 
-          {/* Bookmarks Panel */}
-          {showBookmarks && (
-            <div className="w-80 ml-8 bg-white rounded-lg shadow-lg p-4">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-semibold">Bookmarks</h2>
-                <button
-                  onClick={addBookmark}
-                  className="text-blue-500 hover:text-blue-600"
-                >
-                  Add Bookmark
-                </button>
-              </div>
-              <div className="space-y-2">
-                {bookmarks.map(bookmark => (
-                  <div
-                    key={bookmark.id}
-                    className="flex justify-between items-start p-2 bg-gray-50 rounded"
-                  >
-                    <div>
-                      <button
-                        onClick={() => handlePageChange(bookmark.page_number)}
-                        className="text-blue-500 hover:text-blue-600"
-                      >
-                        Page {bookmark.page_number}
-                      </button>
-                      {bookmark.note && (
-                        <p className="text-sm text-gray-600 mt-1">
-                          {bookmark.note}
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => removeBookmark(bookmark.id)}
-                      className="text-red-500 hover:text-red-600"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-                {bookmarks.length === 0 && (
-                  <p className="text-gray-500 text-center py-4">
-                    No bookmarks yet
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
+          {/* Navigation Controls */}
+          <div className="mt-4 flex justify-between items-center">
+            <ResponsiveButton
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={currentPage <= 1}
+              variant="secondary"
+            >
+              Previous
+            </ResponsiveButton>
+            <span className="text-gray-600">
+              Page {currentPage} of {totalPages}
+            </span>
+            <ResponsiveButton
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={currentPage >= totalPages}
+              variant="secondary"
+            >
+              Next
+            </ResponsiveButton>
+          </div>
         </div>
+
+        {/* Bookmarks Panel */}
+        {showBookmarks && (
+          <div className="w-80 ml-8 bg-white rounded-lg shadow-lg p-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold">Bookmarks</h2>
+              <ResponsiveButton
+                onClick={handleAddBookmark}
+                variant="secondary"
+              >
+                Add Bookmark
+              </ResponsiveButton>
+            </div>
+            <div className="space-y-2">
+              {bookmarks.map(bookmark => (
+                <div
+                  key={bookmark.id}
+                  className="flex justify-between items-start p-2 bg-gray-50 rounded"
+                >
+                  <div>
+                    <button
+                      onClick={() => handlePageChange(bookmark.page_number)}
+                      className="text-blue-500 hover:text-blue-600"
+                    >
+                      Page {bookmark.page_number}
+                    </button>
+                    {bookmark.note && (
+                      <p className="text-sm text-gray-600 mt-1">
+                        {bookmark.note}
+                      </p>
+                    )}
+                  </div>
+                  <ResponsiveButton
+                    onClick={() => handleRemoveBookmark(bookmark.id)}
+                    variant="secondary"
+                  >
+                    Remove
+                  </ResponsiveButton>
+                </div>
+              ))}
+              {bookmarks.length === 0 && (
+                <p className="text-gray-500 text-center py-4">
+                  No bookmarks yet
+                </p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    </ResponsiveLayout>
   );
 };
 
