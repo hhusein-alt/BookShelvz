@@ -10,6 +10,20 @@ const { errorHandler } = require('./server/middleware/errorHandler');
 const booksRouter = require('./server/routes/books');
 const categoriesRouter = require('./server/routes/categories');
 
+// Debug environment variables
+console.log('Environment Variables:');
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL);
+console.log('SUPABASE_KEY:', process.env.SUPABASE_KEY ? 'exists' : 'missing');
+console.log('PORT:', process.env.PORT);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+
+// Validate required environment variables
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+  console.error('Error: Required environment variables are missing.');
+  console.error('Please ensure SUPABASE_URL and SUPABASE_KEY are set in your .env file.');
+  process.exit(1);
+}
+
 const app = express();
 const port = process.env.PORT || 3000;
 
